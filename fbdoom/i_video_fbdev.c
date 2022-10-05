@@ -172,8 +172,10 @@ void I_InitGraphics (void)
 
     /* fetch framebuffer info */
     ioctl(fd_fb, FBIOGET_VSCREENINFO, &fb);
+    fb.rotate = 1;
     /* change params if needed */
-    //ioctl(fd_fb, FBIOPUT_VSCREENINFO, &fb);
+    ioctl(fd_fb, FBIOPUT_VSCREENINFO, &fb);
+    ioctl(fd_fb, FBIOGET_VSCREENINFO, &fb);
     printf("I_InitGraphics: framebuffer: x_res: %d, y_res: %d, x_virtual: %d, y_virtual: %d, bpp: %d, grayscale: %d\n",
             fb.xres, fb.yres, fb.xres_virtual, fb.yres_virtual, fb.bits_per_pixel, fb.grayscale);
 
@@ -404,7 +406,7 @@ void I_FinishUpdate (void)
 {
     int y;
     int x_offset, y_offset, x_offset_end;
-    unsigned char *line_in, *line_out;
+    unsigned char *line_in, *line_out, *col_out_start;
 
     /* Offsets in case FB is bigger than DOOM */
     /* 600 = fb heigt, 200 screenheight */
@@ -418,34 +420,60 @@ void I_FinishUpdate (void)
     /* DRAW SCREEN */
     line_in  = (unsigned char *) I_VideoBuffer;
     line_out = (unsigned char *) I_VideoBuffer_FB;
+    col_out_start = (unsigned char *) I_VideoBuffer_FB;
+//    col_out_start += x_offset;
 
     y = SCREENHEIGHT;
+    line_in += SCREENWIDTH * (y - 1);
 
     while (y--)
     {
         int i;
         for (i = 0; i < fb_scaling; i++) {
-            line_out += x_offset;
-#ifdef CMAP256
-            for (fb_scaling == 1) {
-                memcpy(line_out, line_in, SCREENWIDTH); /* fb_width is bigger than Doom SCREENWIDTH... */
-            } else {
-                //XXX FIXME fb_scaling support!
-            }
-#else
             //cmap_to_rgb565((void*)line_out, (void*)line_in, SCREENWIDTH);
-            cmap_to_fb((void*)line_out, (void*)line_in, SCREENWIDTH);
-#endif
+//            const int line_len = (SCREENWIDTH * fb_scaling * (fb.bits_per_pixel/8)) + x_offset_end;
+	    const int line_len = fb.xres * fb.bits_per_pixel/8;
+            cmap_to_fb_flip((void*)col_out_start, (void*)line_in, SCREENWIDTH,line_len);
             line_out += (SCREENWIDTH * fb_scaling * (fb.bits_per_pixel/8)) + x_offset_end;
+	    col_out_start += fb.bits_per_pixel/8;
         }
-        line_in += SCREENWIDTH;
+        line_in -= SCREENWIDTH;
     }
 
     /* Start drawing from y-offset */
-    lseek(fd_fb, y_offset * fb.xres, SEEK_SET);
-    write(fd_fb, I_VideoBuffer_FB, (SCREENHEIGHT * fb_scaling * (fb.bits_per_pixel/8)) * fb.xres); /* draw only portion used by doom + x-offsets */
+    lseek(fd_fb, 0, SEEK_SET);
+    write(fd_fb, I_VideoBuffer_FB, (fb.bits_per_pixel/8) * fb.xres * fb.yres); /* draw only portion used by doom + x-offsets */
+//    lseek(fd_fb, y_offset * fb.xres, SEEK_SET);
+//    write(fd_fb, I_VideoBuffer_FB, (SCREENHEIGHT * fb_scaling * (fb.bits_per_pixel/8)) * fb.xres); /* draw only portion used by doom + x-offsets */
 }
 
+void cmap_to_fb_flip(uint8_t * out, uint8_t * in, int in_pixels, int line_length)
+{
+    int i, j, k;
+    struct color c;
+    uint32_t pix;
+    uint16_t r, g, b;
+
+    for (i = 0; i < in_pixels; i++)
+    {
+        c = colors[*in];  /* R:8 G:8 B:8 format! */
+        r = (uint16_t)(c.r >> (8 - fb.red.length));
+        g = (uint16_t)(c.g >> (8 - fb.green.length));
+        b = (uint16_t)(c.b >> (8 - fb.blue.length));
+        pix = r << fb.red.offset;
+        pix |= g << fb.green.offset;
+        pix |= b << fb.blue.offset;
+
+        for (k = 0; k < fb_scaling; k++) {
+            for (j = 0; j < fb.bits_per_pixel/8; j++) {
+                *out = (pix >> (j*8));
+		out++;
+            }
+            out += line_length - fb.bits_per_pixel/8;
+        }
+        in++;
+    }
+}
 //
 // I_ReadScreen
 //

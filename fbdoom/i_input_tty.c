@@ -277,53 +277,9 @@ void kbd_shutdown(void)
 static int kbd_init(void)
 {
     struct termios new_term;
-    char *files_to_try[] = {"/dev/tty", "/dev/tty0", "/dev/console", NULL};
-    int i;
     int flags;
-    int found = 0;
 
-    /* First we need to find a file descriptor that represents the
-       system's keyboard. This should be /dev/tty, /dev/console,
-       stdin, stdout, or stderr. We'll try them in that order.
-       If none are acceptable, we're probably not being run
-       from a VT. */
-    for (i = 0; files_to_try[i] != NULL; i++) {
-        /* Try to open the file. */
-        kb = open(files_to_try[i], O_RDONLY);
-        if (kb < 0) continue;
-        /* See if this is valid for our purposes. */
-        if (tty_is_kbd(kb)) {
-            printf("Using keyboard on %s.\n", files_to_try[i]);
-            found = 1;
-            break;
-        }
-        close(kb);
-    }
-
-    /* If those didn't work, not all is lost. We can try the
-       3 standard file descriptors, in hopes that one of them
-       might point to a console. This is not especially likely. */
-    if (files_to_try[i] == NULL) {
-        for (kb = 0; kb < 3; kb++) {
-            if (tty_is_kbd(i)) {
-                found = 1;
-                break;
-            }
-        }
-    }
-
-    if (!found) {
-        printf("Unable to find a file descriptor associated with "\
-                "the keyboard.\n" \
-                "Perhaps you're not using a virtual terminal?\n");
-        return 1;
-    }
-
-    /* Find the keyboard's mode so we can restore it later. */
-    if (ioctl(kb, KDGKBMODE, &old_mode) != 0) {
-        printf("Unable to query keyboard mode.\n");
-        kbd_shutdown();
-    }
+    kb = open("/dev/ttyS1", O_RDONLY);
 
     /* Adjust the terminal's settings. In particular, disable
        echoing, signal generation, and line buffering. Any of
@@ -343,12 +299,6 @@ static int kbd_init(void)
         printf("Unable to change terminal settings.\n");
     }
     
-    /* Put the keyboard in mediumraw mode. */
-    if (ioctl(kb, KDSKBMODE, K_MEDIUMRAW) != 0) {
-        printf("Unable to set mediumraw mode.\n");
-        kbd_shutdown();
-    }
-
     /* Put in non-blocking mode */
     flags = fcntl(kb, F_GETFL, 0);
     fcntl(kb, F_SETFL, flags | O_NONBLOCK);
